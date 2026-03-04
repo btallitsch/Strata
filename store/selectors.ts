@@ -1,44 +1,41 @@
 import { useMemo } from "react";
-import { useWorkouts, useNutrition, useUser, useGoals } from "./index";
+import { useShallow } from "zustand/react/shallow";
+import { useStore } from "./index";
 import { calculateBMR, calculateTDEE, calculateMacros, calcAdherence } from "@/lib/utils/nutrition";
 import { calcGoalProgress } from "@/lib/utils/goals";
 
 // ─── DASHBOARD SELECTORS ──────────────────────────────────────────────────────
-// Aggregates across workout + nutrition + goals slices.
-// This is the "intelligence" layer — pure derived state.
+// Reads from 3 slices simultaneously. useShallow on each prevents the
+// "new object reference every render" loop.
 
 export function useDashboardSelectors() {
-  const workouts  = useWorkouts();
-  const nutrition = useNutrition();
-  const goals     = useGoals();
+  const workouts  = useStore((s) => s.workouts);
+  const nutrition = useStore(useShallow((s) => ({
+    days:            s.nutrition.days,
+    targetCalories:  s.nutrition.targetCalories,
+  })));
+  const goals = useStore((s) => s.goals);
 
   return useMemo(() => {
-    const thisWeek      = workouts.slice(0, 4);
-    const weeklyVolume  = thisWeek.reduce((sum, w) => sum + w.volume, 0);
-    const weeklyPRs     = thisWeek.reduce((sum, w) => sum + w.prs, 0);
-    const avgRPE        = thisWeek.length
-      ? (thisWeek.flatMap((w) => w.exercises).reduce((sum, e) => sum + e.rpe, 0) /
-         thisWeek.flatMap((w) => w.exercises).length).toFixed(1)
+    const thisWeek     = workouts.slice(0, 4);
+    const weeklyVolume = thisWeek.reduce((sum, w) => sum + w.volume, 0);
+    const weeklyPRs    = thisWeek.reduce((sum, w) => sum + w.prs, 0);
+
+    const allExercises = thisWeek.flatMap((w) => w.exercises);
+    const avgRPE = allExercises.length
+      ? (allExercises.reduce((sum, e) => sum + e.rpe, 0) / allExercises.length).toFixed(1)
       : "—";
 
-    // Consistency: sessions this week vs target of 4
-    const consistencyScore = Math.min(
-      100,
-      Math.round((thisWeek.length / 4) * 100)
-    );
+    const consistencyScore = Math.min(100, Math.round((thisWeek.length / 4) * 100));
+    const calorieAdherence = calcAdherence(nutrition.days);
 
-    const calorieAdherence  = calcAdherence(nutrition.days);
-    const weeklyCalAvg      = Math.round(
-      nutrition.days.reduce((s, d) => s + d.actual, 0) / nutrition.days.length
-    );
-
-    const fatLossGoal       = goals.find((g) => g.type === "fat_loss");
-    const weightTrend       = fatLossGoal
-      ? (fatLossGoal.current - 185.4).toFixed(1) // delta from start
+    const fatLossGoal  = goals.find((g) => g.type === "fat_loss");
+    const weightTrend  = fatLossGoal
+      ? (fatLossGoal.current - 185.4).toFixed(1)
       : "—";
 
-    const hasGoalConflict   = goals.some((g) => g.status === "at_risk");
-    const goalsOnTrack      = goals.filter((g) => g.status === "on_track").length;
+    const hasGoalConflict = goals.some((g) => g.status === "at_risk");
+    const goalsOnTrack    = goals.filter((g) => g.status === "on_track").length;
 
     return {
       weeklyVolume,
@@ -46,38 +43,41 @@ export function useDashboardSelectors() {
       avgRPE,
       consistencyScore,
       calorieAdherence,
-      weeklyCalAvg,
       weightTrend,
       hasGoalConflict,
       goalsOnTrack,
     };
-  }, [workouts, nutrition, goals]);
+  }, [workouts, nutrition.days, nutrition.targetCalories, goals]);
 }
 
 // ─── NUTRITION SELECTORS ──────────────────────────────────────────────────────
-// Derives TDEE and macros from user + nutrition slices together.
 
 export function useNutritionSelectors() {
-  const user      = useUser();
-  const nutrition = useNutrition();
+  const user = useStore(useShallow((s) => ({
+    weight:        s.user.weight,
+    heightIn:      s.user.heightIn,
+    age:           s.user.age,
+    isMale:        s.user.isMale,
+    activityLevel: s.user.activityLevel,
+  })));
+  const goal = useStore((s) => s.nutrition.goal);
 
   return useMemo(() => {
     const bmr   = calculateBMR(user.weight, user.heightIn, user.age, user.isMale);
     const tdee  = calculateTDEE(bmr, user.activityLevel);
-    const macro = calculateMacros(user.weight, tdee, nutrition.goal);
+    const macro = calculateMacros(user.weight, tdee, goal);
 
-    const deficit  = tdee - macro.calories;
-    const weeklyLossEstimate = (deficit / 3500) * 7;
+    const deficit             = tdee - macro.calories;
+    const weeklyLossEstimate  = (deficit / 3500) * 7;
 
     return { bmr, tdee, macro, deficit, weeklyLossEstimate };
-  }, [user, nutrition.goal]);
+  }, [user.weight, user.heightIn, user.age, user.isMale, user.activityLevel, goal]);
 }
 
 // ─── GOAL SELECTORS ───────────────────────────────────────────────────────────
-// Enriches each goal with its computed progress percentage.
 
 export function useGoalsWithProgress() {
-  const goals = useGoals();
+  const goals = useStore((s) => s.goals);
 
   return useMemo(
     () => goals.map((g) => ({ ...g, progress: calcGoalProgress(g) })),
@@ -86,18 +86,22 @@ export function useGoalsWithProgress() {
 }
 
 // ─── CONFLICT DETECTOR ────────────────────────────────────────────────────────
-// Cross-slice: reads nutrition target + fat loss goal deadline to
-// determine if the deficit is sufficient to hit the goal in time.
 
 export function useGoalConflicts() {
-  const nutrition = useNutrition();
-  const user      = useUser();
-  const goals     = useGoals();
+  const targetCalories = useStore((s) => s.nutrition.targetCalories);
+  const user = useStore(useShallow((s) => ({
+    weight:        s.user.weight,
+    heightIn:      s.user.heightIn,
+    age:           s.user.age,
+    isMale:        s.user.isMale,
+    activityLevel: s.user.activityLevel,
+  })));
+  const goals = useStore((s) => s.goals);
 
   return useMemo(() => {
-    const bmr  = calculateBMR(user.weight, user.heightIn, user.age, user.isMale);
-    const tdee = calculateTDEE(bmr, user.activityLevel);
-    const dailyDeficit = tdee - nutrition.targetCalories;
+    const bmr          = calculateBMR(user.weight, user.heightIn, user.age, user.isMale);
+    const tdee         = calculateTDEE(bmr, user.activityLevel);
+    const dailyDeficit = tdee - targetCalories;
 
     const fatLossGoal = goals.find((g) => g.type === "fat_loss");
     if (!fatLossGoal) return { hasConflict: false, message: null };
@@ -110,7 +114,7 @@ export function useGoalConflicts() {
       )
     );
     const requiredDailyDeficit = (lbsToLose * 3500) / daysUntilDeadline;
-    const hasConflict = requiredDailyDeficit > dailyDeficit + 100; // 100 kcal tolerance
+    const hasConflict = requiredDailyDeficit > dailyDeficit + 100;
 
     return {
       hasConflict,
@@ -120,5 +124,5 @@ export function useGoalConflicts() {
           `Consider extending deadline or reducing intake.`
         : null,
     };
-  }, [nutrition, user, goals]);
+  }, [targetCalories, user.weight, user.heightIn, user.age, user.isMale, user.activityLevel, goals]);
 }

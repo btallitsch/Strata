@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
+import { useShallow } from "zustand/react/shallow";
 
 import { createUserSlice, type UserSlice } from "./slices/userSlice";
 import { createWorkoutSlice, type WorkoutSlice } from "./slices/workoutSlice";
@@ -11,8 +12,6 @@ import { createGoalsSlice, type GoalsSlice } from "./slices/goalsSlice";
 export type AppStore = UserSlice & WorkoutSlice & NutritionSlice & GoalsSlice;
 
 // ─── STORE ────────────────────────────────────────────────────────────────────
-// devtools() wires up Redux DevTools in the browser — you can inspect
-// every action and state snapshot in the browser extension.
 
 export const useStore = create<AppStore>()(
   devtools(
@@ -26,45 +25,55 @@ export const useStore = create<AppStore>()(
   )
 );
 
-// ─── NAMED SLICE SELECTORS ────────────────────────────────────────────────────
-// Import these in components instead of selecting the whole store.
-// Each returns a stable reference — Zustand only re-renders the
-// component when the selected value actually changes.
-//
-// Usage:
-//   const workouts = useWorkouts();
-//   const { setTargetCalories } = useNutritionActions();
+// ─── STATE SELECTORS ──────────────────────────────────────────────────────────
+// Primitive selectors (return a single value) are fine without useShallow.
+// Object/array selectors MUST use useShallow — without it Zustand compares
+// the returned object by reference, sees a new object every render, and
+// triggers an infinite re-render loop (React error #185).
 
-export const useUser       = () => useStore((s) => s.user);
-export const useWorkouts   = () => useStore((s) => s.workouts);
-export const useNutrition  = () => useStore((s) => s.nutrition);
-export const useGoals      = () => useStore((s) => s.goals);
+export const useUser      = () => useStore((s) => s.user);
+export const useWorkouts  = () => useStore((s) => s.workouts);
+export const useNutrition = () => useStore((s) => s.nutrition);
+export const useGoals     = () => useStore((s) => s.goals);
+
+// ─── ACTION SELECTORS ─────────────────────────────────────────────────────────
+// These return plain functions (stable references), but they're still wrapped
+// in useShallow so bundling them into an object doesn't create a new reference
+// on each render.
 
 export const useUserActions = () =>
-  useStore((s) => ({
-    setWeight:        s.setWeight,
-    setActivityLevel: s.setActivityLevel,
-    setAge:           s.setAge,
-  }));
+  useStore(
+    useShallow((s) => ({
+      setWeight:        s.setWeight,
+      setActivityLevel: s.setActivityLevel,
+      setAge:           s.setAge,
+    }))
+  );
 
 export const useWorkoutActions = () =>
-  useStore((s) => ({
-    addWorkout:    s.addWorkout,
-    removeWorkout: s.removeWorkout,
-  }));
+  useStore(
+    useShallow((s) => ({
+      addWorkout:    s.addWorkout,
+      removeWorkout: s.removeWorkout,
+    }))
+  );
 
 export const useNutritionActions = () =>
-  useStore((s) => ({
-    setTargetCalories: s.setTargetCalories,
-    setNutritionGoal:  s.setNutritionGoal,
-    logDay:            s.logDay,
-  }));
+  useStore(
+    useShallow((s) => ({
+      setTargetCalories: s.setTargetCalories,
+      setNutritionGoal:  s.setNutritionGoal,
+      logDay:            s.logDay,
+    }))
+  );
 
 export const useGoalsActions = () =>
-  useStore((s) => ({
-    addGoal:            s.addGoal,
-    updateGoalCurrent:  s.updateGoalCurrent,
-    updateGoalStatus:   s.updateGoalStatus,
-    updateGoalDeadline: s.updateGoalDeadline,
-    updateGoalWarning:  s.updateGoalWarning,
-  }));
+  useStore(
+    useShallow((s) => ({
+      addGoal:            s.addGoal,
+      updateGoalCurrent:  s.updateGoalCurrent,
+      updateGoalStatus:   s.updateGoalStatus,
+      updateGoalDeadline: s.updateGoalDeadline,
+      updateGoalWarning:  s.updateGoalWarning,
+    }))
+  );
