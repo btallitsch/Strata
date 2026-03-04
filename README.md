@@ -10,6 +10,7 @@ Not just a tracker — it explains *why* numbers change, models tradeoffs, and a
 
 - **Next.js 15** (App Router)
 - **React 19** with TypeScript
+- **Zustand 5** — global state with slice pattern + devtools
 - **Recharts** for data visualization
 - **IBM Plex Mono + DM Serif Display** — custom type system
 - Zero external UI libraries — fully custom component system
@@ -25,6 +26,15 @@ fitnessiq/
 │   ├── page.tsx            # App shell + view router
 │   └── globals.css         # Global resets + scrollbar
 │
+├── store/                  # ✅ Zustand global state
+│   ├── index.ts            # useStore, named slice hooks, action hooks
+│   ├── selectors.ts        # Cross-slice derived state (dashboard KPIs, conflicts)
+│   └── slices/
+│       ├── userSlice.ts    # weight, height, age, activityLevel
+│       ├── workoutSlice.ts # session log, addWorkout, PR detection
+│       ├── nutritionSlice.ts # targetCalories, goal, daily logs
+│       └── goalsSlice.ts   # goals array, update actions
+│
 ├── components/
 │   ├── layout/
 │   │   ├── Nav.tsx         # Top navigation bar
@@ -35,16 +45,16 @@ fitnessiq/
 │   │   ├── Tag.tsx         # Pill/badge label
 │   │   └── misc.tsx        # Divider, SectionLabel, RPEBadge, ChartTooltip
 │   └── views/
-│       ├── DashboardView.tsx   # Weekly intelligence report
-│       ├── WorkoutView.tsx     # Session log + exercise detail
-│       ├── NutritionView.tsx   # TDEE calculator + macro engine
-│       └── GoalsView.tsx       # Adaptive goal system
+│       ├── DashboardView.tsx   # Reads from store via useDashboardSelectors()
+│       ├── WorkoutView.tsx     # Reads/writes workoutSlice
+│       ├── NutritionView.tsx   # Reads/writes userSlice + nutritionSlice
+│       └── GoalsView.tsx       # Reads goalsSlice + cross-slice conflict selector
 │
 ├── lib/
 │   ├── constants/
 │   │   └── tokens.ts       # Design tokens (colors, fonts, goal configs)
 │   ├── data/
-│   │   └── mockData.ts     # Typed mock data (workouts, weight, calories, goals)
+│   │   └── mockData.ts     # Seed data (consumed by slice initialState)
 │   └── utils/
 │       ├── nutrition.ts    # BMR/TDEE/macro calculations
 │       ├── workout.ts      # Volume, RPE color, formatting

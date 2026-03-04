@@ -1,33 +1,39 @@
 "use client";
 
-import { useState } from "react";
+// ─── WHAT CHANGED ─────────────────────────────────────────────────────────────
+// BEFORE: activityLevel and goal were local useState. TDEE and macros
+//         recalculated in the component only — nothing else knew they changed.
+//         USER_WEIGHT_LBS was a hardcoded constant at the top of the file.
+//
+// AFTER:  activityLevel lives in userSlice (setActivityLevel).
+//         goal lives in nutritionSlice (setNutritionGoal).
+//         targetCalories lives in nutritionSlice (setTargetCalories).
+//         Weight comes from userSlice.
+//         useNutritionSelectors() computes BMR/TDEE/macros from the
+//         combined user + nutrition state — meaning a weight update
+//         in userSlice automatically flows here too.
+//         When goal changes, the dashboard adherence recalculates.
+// ─────────────────────────────────────────────────────────────────────────────
+
 import Card from "@/components/ui/Card";
 import Stat from "@/components/ui/Stat";
-import Tag from "@/components/ui/Tag";
 import { Divider, SectionLabel } from "@/components/ui/misc";
 import { C, font } from "@/lib/constants/tokens";
-import { calorieData } from "@/lib/data/mockData";
-import {
-  calculateBMR,
-  calculateTDEE,
-  calculateMacros,
-  calcAdherence,
-  deficitLabel,
-  macroCals,
-} from "@/lib/utils/nutrition";
-import type { ActivityLevel, GoalType, MacroTargets } from "@/types";
 
-// ─── USER CONSTANTS (replace with real profile later) ─────────────────────────
-const USER_WEIGHT_LBS = 181.4;
-const USER_HEIGHT_IN  = 70;
-const USER_AGE        = 28;
+// ✅ NEW: store hooks replace local useState for persistent values
+import { useUser, useNutrition, useUserActions, useNutritionActions } from "@/store";
+import { useNutritionSelectors } from "@/store/selectors";
+
+import { deficitLabel, macroCals } from "@/lib/utils/nutrition";
+import type { ActivityLevel, GoalType } from "@/types";
 
 // ─── EXPLAINABILITY COPY ─────────────────────────────────────────────────────
-function getExplainerItems(deficit: number) {
+
+function getExplainerItems(deficit: number, weightLbs: number) {
   return [
     {
       q: "Why 1g protein/lb?",
-      a: "At a caloric deficit, higher protein intake (0.8–1.2g/lb) preserves lean mass and increases satiety. Your current weight-loss rate favors the upper bound.",
+      a: `At a caloric deficit, higher protein intake (0.8–1.2g/lb) preserves lean mass and increases satiety. At ${weightLbs.toFixed(1)} lbs that's ${Math.round(weightLbs)}g/day.`,
     },
     {
       q: `Why a ${deficit} kcal deficit?`,
@@ -41,6 +47,7 @@ function getExplainerItems(deficit: number) {
 }
 
 // ─── MACRO BAR ────────────────────────────────────────────────────────────────
+
 interface MacroBarProps {
   label: string;
   grams: number;
@@ -61,29 +68,31 @@ function MacroBar({ label, grams, cals, totalCals, color }: MacroBarProps) {
         </div>
       </div>
       <div style={{ height: 6, background: C.surfaceAlt, borderRadius: 3, overflow: "hidden" }}>
-        <div
-          style={{
-            width: `${pct}%`, height: "100%", background: color,
-            borderRadius: 3, transition: "width 0.4s ease",
-          }}
-        />
+        <div style={{
+          width: `${pct}%`, height: "100%", background: color,
+          borderRadius: 3, transition: "width 0.4s ease",
+        }} />
       </div>
     </div>
   );
 }
 
 // ─── MAIN VIEW ────────────────────────────────────────────────────────────────
-export default function NutritionView() {
-  const [activityLevel, setActivityLevel] = useState<ActivityLevel>("moderate");
-  const [goal, setGoal]                   = useState<GoalType>("cut");
 
-  const bmr     = calculateBMR(USER_WEIGHT_LBS, USER_HEIGHT_IN, USER_AGE);
-  const tdee    = calculateTDEE(bmr, activityLevel);
-  const macro   = calculateMacros(USER_WEIGHT_LBS, tdee, goal);
+export default function NutritionView() {
+  // ✅ NEW: read from store slices
+  const user      = useUser();
+  const nutrition = useNutrition();
+
+  // ✅ NEW: actions write back to store
+  const { setActivityLevel } = useUserActions();
+  const { setNutritionGoal, setTargetCalories } = useNutritionActions();
+
+  // ✅ NEW: derived values from combined user + nutrition state
+  const { bmr, tdee, macro, deficit } = useNutritionSelectors();
   const { proteinCals, carbCals, fatCals } = macroCals(macro);
-  const adherence = calcAdherence(calorieData);
-  const deficit   = Math.abs(tdee - macro.calories);
-  const explainers = getExplainerItems(deficit);
+
+  const explainers = getExplainerItems(Math.abs(deficit), user.weight);
 
   const goalColors: Record<GoalType, string> = {
     cut: C.red, maintain: C.blue, bulk: C.accent,
@@ -105,26 +114,25 @@ export default function NutritionView() {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Card>
             <SectionLabel>Mifflin-St Jeor Formula</SectionLabel>
-            <div
-              style={{
-                padding: "10px 14px", background: C.surfaceAlt,
-                borderRadius: 3, border: `1px solid ${C.border}`, marginBottom: 16,
-                fontFamily: font.mono, fontSize: 11, color: C.body, lineHeight: 2,
-              }}
-            >
+            {/* ✅ NEW: formula uses live user.weight and user.heightIn from userSlice */}
+            <div style={{
+              padding: "10px 14px", background: C.surfaceAlt,
+              borderRadius: 3, border: `1px solid ${C.border}`, marginBottom: 16,
+              fontFamily: font.mono, fontSize: 11, color: C.body, lineHeight: 2,
+            }}>
               <div style={{ color: C.muted, fontSize: 10, marginBottom: 4 }}>BMR =</div>
               <div>
-                10 × <span style={{ color: C.accent }}>{(USER_WEIGHT_LBS * 0.453592).toFixed(1)}kg</span>
-                {" "}+ 6.25 × <span style={{ color: C.accent }}>{(USER_HEIGHT_IN * 2.54).toFixed(1)}cm</span>
+                10 × <span style={{ color: C.accent }}>{(user.weight * 0.453592).toFixed(1)}kg</span>
+                {" "}+ 6.25 × <span style={{ color: C.accent }}>{(user.heightIn * 2.54).toFixed(1)}cm</span>
               </div>
               <div>
-                − 5 × <span style={{ color: C.blue }}>{USER_AGE}yrs</span>
+                − 5 × <span style={{ color: C.blue }}>{user.age}yrs</span>
                 {" "}+ <span style={{ color: C.blue }}>5</span>
                 {" "}= <span style={{ color: C.heading, fontWeight: 700, fontSize: 14 }}>{bmr} kcal</span>
               </div>
             </div>
 
-            {/* Activity selector */}
+            {/* ✅ NEW: setActivityLevel writes to userSlice */}
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontFamily: font.mono, fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>
                 Activity Level
@@ -135,9 +143,9 @@ export default function NutritionView() {
                     key={level}
                     onClick={() => setActivityLevel(level)}
                     style={{
-                      background: activityLevel === level ? C.accentMuted : "transparent",
-                      border: `1px solid ${activityLevel === level ? C.accent : C.border}`,
-                      color: activityLevel === level ? C.accent : C.muted,
+                      background: user.activityLevel === level ? C.accentMuted : "transparent",
+                      border: `1px solid ${user.activityLevel === level ? C.accent : C.border}`,
+                      color: user.activityLevel === level ? C.accent : C.muted,
                       fontFamily: font.mono, fontSize: 10, padding: "5px 10px",
                       borderRadius: 2, cursor: "pointer", textTransform: "capitalize" as const,
                     }}
@@ -148,7 +156,7 @@ export default function NutritionView() {
               </div>
             </div>
 
-            {/* Goal selector */}
+            {/* ✅ NEW: setNutritionGoal writes to nutritionSlice */}
             <div>
               <div style={{ fontFamily: font.mono, fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>
                 Goal
@@ -157,11 +165,11 @@ export default function NutritionView() {
                 {(["cut", "maintain", "bulk"] as GoalType[]).map((g) => (
                   <button
                     key={g}
-                    onClick={() => setGoal(g)}
+                    onClick={() => setNutritionGoal(g)}
                     style={{
-                      background: goal === g ? goalColors[g] + "22" : "transparent",
-                      border: `1px solid ${goal === g ? goalColors[g] : C.border}`,
-                      color: goal === g ? goalColors[g] : C.muted,
+                      background: nutrition.goal === g ? goalColors[g] + "22" : "transparent",
+                      border: `1px solid ${nutrition.goal === g ? goalColors[g] : C.border}`,
+                      color: nutrition.goal === g ? goalColors[g] : C.muted,
                       fontFamily: font.mono, fontSize: 11, padding: "6px 16px",
                       borderRadius: 2, cursor: "pointer", textTransform: "capitalize" as const,
                       fontWeight: 600,
@@ -176,8 +184,10 @@ export default function NutritionView() {
 
           <Card accent={C.accent}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+              {/* ✅ NEW: both values from useNutritionSelectors() */}
               <Stat label="TDEE"            value={tdee}           unit="kcal" sub="Total daily energy" />
-              <Stat label="Target Calories" value={macro.calories} unit="kcal" sub={deficitLabel(tdee, macro.calories, goal)} accent={C.accent} />
+              <Stat label="Target Calories" value={macro.calories} unit="kcal"
+                sub={deficitLabel(tdee, macro.calories, nutrition.goal)} accent={C.accent} />
             </div>
             <Divider style={{ margin: "16px 0" }} />
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -188,25 +198,18 @@ export default function NutritionView() {
           </Card>
         </div>
 
-        {/* Right column */}
+        {/* Right column — explainers now use live weight */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Card>
             <SectionLabel>Why These Numbers</SectionLabel>
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {explainers.map((item, i) => (
-                <div
-                  key={i}
-                  style={{
-                    padding: "12px 14px", background: C.surfaceAlt,
-                    border: `1px solid ${C.border}`, borderRadius: 3,
-                  }}
-                >
-                  <div style={{ fontFamily: font.mono, fontSize: 11, color: C.accent, marginBottom: 6 }}>
-                    {item.q}
-                  </div>
-                  <div style={{ fontFamily: font.body, fontSize: 12, color: C.body, lineHeight: 1.6 }}>
-                    {item.a}
-                  </div>
+                <div key={i} style={{
+                  padding: "12px 14px", background: C.surfaceAlt,
+                  border: `1px solid ${C.border}`, borderRadius: 3,
+                }}>
+                  <div style={{ fontFamily: font.mono, fontSize: 11, color: C.accent, marginBottom: 6 }}>{item.q}</div>
+                  <div style={{ fontFamily: font.body, fontSize: 12, color: C.body, lineHeight: 1.6 }}>{item.a}</div>
                 </div>
               ))}
             </div>
