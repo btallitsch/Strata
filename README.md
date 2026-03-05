@@ -4,6 +4,8 @@ A unified fitness **decision engine** built with Next.js 15, React 19, and TypeS
 
 Not just a tracker — it explains *why* numbers change, models tradeoffs, and adapts recommendations based on your behavior.
 
+See it in action here: https://strata-rho-ten.vercel.app/
+
 ---
 
 ## Tech Stack
